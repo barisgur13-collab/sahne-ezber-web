@@ -18,6 +18,7 @@ jobs:
         with:
           node-version: '20'
       - run: npm install
+      - run: npm install lucide-react
       - run: npm run build
         env:
           CI: false
