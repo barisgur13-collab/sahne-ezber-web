@@ -17,12 +17,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install
-      - run: npm install lucide-react
+      
+      # GitHub'a da versiyon çakışmalarını atlamasını söylüyoruz
+      - run: npm install --legacy-peer-deps
+      - run: npm install lucide-react --legacy-peer-deps
+      
       - run: npm run build
         env:
           CI: false
+          
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
+          
       - uses: actions/deploy-pages@v4
