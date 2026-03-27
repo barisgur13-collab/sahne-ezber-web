@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, Play, ChevronRight, ChevronLeft, Trash2, 
   BookOpen, FastForward, Pause, HelpCircle, 
-  Lock, Unlock, Timer, Check, List, X, Lightbulb, Zap, Loader2, Users, Plus, FolderOpen, Flame, Settings, Info, Smartphone
+  Lock, Unlock, Timer, Check, List, X, Lightbulb, Zap, Loader2, Users, Plus, FolderOpen, Flame, Settings, Info
 } from 'lucide-react';
 
 const MAMMOTH_URL = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js";
@@ -50,7 +50,6 @@ const deleteProjectDB = async (id) => {
 };
 // ----------------------------------------------
 
-// YARDIMCI FONKSİYONLAR (Eski projelerle uyumluluk için)
 const getCharCounts = (script) => {
   const counts = {};
   script.forEach(l => {
@@ -106,7 +105,8 @@ const App = () => {
   // AYARLAR (LOCAL STORAGE)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('sufle_settings');
-    return saved ? JSON.parse(saved) : { darkMode: false, fontSize: 'medium', vibration: true, tutorialSeen: false };
+    const defaultSettings = { darkMode: false, fontSize: 'medium', fontFamily: 'sans', vibration: true, tutorialSeen: false };
+    return saved ? { ...defaultSettings, ...JSON.parse(saved) } : defaultSettings;
   });
 
   // ÖĞRETİCİ STATE
@@ -116,9 +116,16 @@ const App = () => {
   const timerRef = useRef(null);
   const mammothRef = useRef(null);
 
-  // Ayarları Kaydet
+  // Ayarları Kaydet ve HTML tag'ine uygula
   useEffect(() => {
     localStorage.setItem('sufle_settings', JSON.stringify(settings));
+    
+    // Koyu modu direkt HTML etiketine uygula (Kesin çözüm)
+    if (settings.darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
   }, [settings]);
 
   // Kütüphaneyi dinamik yükle
@@ -290,7 +297,7 @@ const App = () => {
     if (newStreak % 10 === 0) {
       setShowTenStreakEffect(true);
       if (settings.vibration && navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]); // Çift titreşim
+        navigator.vibrate([200, 100, 200]); 
       }
       setTimeout(() => setShowTenStreakEffect(false), 2000);
     }
@@ -337,6 +344,20 @@ const App = () => {
     }
   };
 
+  const removeCharacter = (name) => {
+    setCharacters(prev => prev.filter(c => c !== name));
+    setSelectedCharacters(prev => prev.filter(c => c !== name));
+    setScript(prev => prev.map(l => l.character === name ? {...l, character: 'BİLGİ'} : l));
+    
+    // Aktif proje açıksa hafızadaki karakter listesini de güncelle
+    if (activeProject) {
+      const newChars = characters.filter(c => c !== name);
+      const newSelected = selectedCharacters.filter(c => c !== name);
+      const newScript = script.map(l => l.character === name ? {...l, character: 'BİLGİ'} : l);
+      updateProgress({ characters: newChars, selectedCharacters: newSelected, script: newScript });
+    }
+  };
+
   useEffect(() => {
     if (mode === 'practice' && isAutoPlaying && script[currentIndex]) {
       const currentLine = script[currentIndex];
@@ -378,6 +399,12 @@ const App = () => {
     return 'text-2xl md:text-3xl';
   };
 
+  const getFontFamilyClass = () => {
+    if (settings.fontFamily === 'serif') return 'font-serif';
+    if (settings.fontFamily === 'mono') return 'font-mono';
+    return 'font-sans';
+  };
+
   // Öğretici Adımları
   const tutorialData = [
     { icon: <BookOpen className="w-12 h-12 text-indigo-500 mb-4 mx-auto"/>, title: "Sufle'ye Hoş Geldin!", desc: "Sufle, tiyatro ve sahne repliklerini kolayca ezberlemen için tasarlanmış akıllı asistanındır." },
@@ -392,13 +419,13 @@ const App = () => {
     const step = tutorialData[tutorialStep];
     return (
       <div className="fixed inset-0 z-[100] bg-slate-900/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-        <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl relative">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl relative">
           {step.icon}
-          <h2 className="text-2xl font-black text-slate-800 mb-2">{step.title}</h2>
-          <p className="text-slate-600 mb-8 leading-relaxed">{step.desc}</p>
+          <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 mb-2">{step.title}</h2>
+          <p className="text-slate-600 dark:text-slate-300 mb-8 leading-relaxed">{step.desc}</p>
           <div className="flex gap-2 justify-center mb-6">
             {tutorialData.map((_, idx) => (
-              <div key={idx} className={`h-2 rounded-full transition-all ${idx === tutorialStep ? 'w-6 bg-indigo-600' : 'w-2 bg-slate-200'}`} />
+              <div key={idx} className={`h-2 rounded-full transition-all ${idx === tutorialStep ? 'w-6 bg-indigo-600' : 'w-2 bg-slate-200 dark:bg-slate-600'}`} />
             ))}
           </div>
           <button 
@@ -435,7 +462,7 @@ const App = () => {
                 <p className="font-bold">Koyu Mod</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Göz yormayan arayüz</p>
               </div>
-              <button onClick={() => setSettings({...settings, darkMode: !settings.darkMode})} className={`w-12 h-6 rounded-full transition-colors relative ${settings.darkMode ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+              <button onClick={() => setSettings({...settings, darkMode: !settings.darkMode})} className={`w-12 h-6 rounded-full transition-colors relative ${settings.darkMode ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
                 <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${settings.darkMode ? 'left-7' : 'left-1'}`}/>
               </button>
             </div>
@@ -446,7 +473,7 @@ const App = () => {
                 <p className="font-bold">Titreşim (Haptic)</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">10 Seride ve butonlarda</p>
               </div>
-              <button onClick={() => setSettings({...settings, vibration: !settings.vibration})} className={`w-12 h-6 rounded-full transition-colors relative ${settings.vibration ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+              <button onClick={() => setSettings({...settings, vibration: !settings.vibration})} className={`w-12 h-6 rounded-full transition-colors relative ${settings.vibration ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
                 <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${settings.vibration ? 'left-7' : 'left-1'}`}/>
               </button>
             </div>
@@ -467,8 +494,28 @@ const App = () => {
               </div>
             </div>
 
+            {/* Font Tipi */}
+            <div>
+              <p className="font-bold mb-2">Metin Fontu</p>
+              <div className="flex gap-2">
+                {[
+                  { id: 'sans', label: 'Düz (Sans)' },
+                  { id: 'serif', label: 'Kitap (Serif)' },
+                  { id: 'mono', label: 'Daktilo' }
+                ].map(font => (
+                  <button 
+                    key={font.id}
+                    onClick={() => setSettings({...settings, fontFamily: font.id})}
+                    className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-colors ${settings.fontFamily === font.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent border-slate-200 dark:border-slate-600'}`}
+                  >
+                    {font.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Öğretici */}
-            <button onClick={() => { setIsSettingsOpen(false); setTutorialStep(0); setShowTutorial(true); }} className="w-full flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 py-3 rounded-xl font-bold hover:bg-indigo-100 transition-colors">
+            <button onClick={() => { setIsSettingsOpen(false); setTutorialStep(0); setShowTutorial(true); }} className="w-full flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 py-3 rounded-xl font-bold hover:bg-indigo-100 dark:hover:bg-indigo-800 transition-colors">
               <Info className="w-5 h-5"/> Öğreticiyi Tekrar Göster
             </button>
           </div>
@@ -480,6 +527,11 @@ const App = () => {
   // ANA RENDER
   return (
     <div className={`${settings.darkMode ? 'dark' : ''}`}>
+      <style>{`
+        .marquee-container { overflow: hidden; white-space: nowrap; width: 100%; position: relative; }
+        .marquee-content { display: inline-block; animation: marquee 8s linear infinite; }
+        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+      `}</style>
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4 md:p-8 font-sans text-slate-900 dark:text-slate-100 transition-colors">
         
         {renderTutorial()}
@@ -526,16 +578,24 @@ const App = () => {
                   {projects.map(project => {
                     const percent = project.script?.length > 0 ? Math.round((project.currentIndex / project.script.length) * 100) : 0;
                     return (
-                      <div key={project.id} onClick={() => loadProject(project)} className="bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-md transition-all cursor-pointer flex justify-between items-center group">
-                        <div className="flex items-center gap-4 flex-1 min-w-0 overflow-hidden">
+                      <div key={project.id} onClick={() => loadProject(project)} className="bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-md transition-all cursor-pointer flex justify-between items-center group w-full min-w-0 overflow-hidden">
+                        <div className="flex items-center gap-4 flex-1 min-w-0">
                           <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center shrink-0">
                             <FolderOpen className="w-6 h-6" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h3 className="font-bold text-slate-800 dark:text-slate-100 truncate text-lg block w-full" title={project.title}>{project.title}</h3>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2 truncate w-full block">
-                              <span>{project.selectedCharacters?.length > 0 ? project.selectedCharacters.join(', ') : 'Rol seçilmedi'}</span>
-                              • <span className="text-indigo-500 dark:text-indigo-400 font-semibold shrink-0">% {percent} Tamamlandı</span>
+                            {project.title.length > 18 ? (
+                              <div className="marquee-container h-7 w-full overflow-hidden">
+                                <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg marquee-content">
+                                  {project.title} &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; {project.title}
+                                </h3>
+                              </div>
+                            ) : (
+                              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg truncate w-full" title={project.title}>{project.title}</h3>
+                            )}
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2 w-full min-w-0">
+                              <span className="truncate flex-1">{project.selectedCharacters?.length > 0 ? project.selectedCharacters.join(', ') : 'Rol seçilmedi'}</span>
+                              <span className="text-indigo-500 dark:text-indigo-400 font-semibold shrink-0">• % {percent} Tamamlandı</span>
                             </p>
                           </div>
                         </div>
@@ -635,22 +695,25 @@ const App = () => {
                     {characters.map((char) => {
                       const isSelected = selectedCharacters.includes(char);
                       return (
-                        <button key={char} onClick={() => {
-                            const newSelection = isSelected ? selectedCharacters.filter(c => c !== char) : [...selectedCharacters, char];
-                            setSelectedCharacters(newSelection);
-                            updateProgress({ selectedCharacters: newSelection });
-                          }} 
-                          className={`flex items-center justify-between p-4 border rounded-2xl transition-all w-full text-left ${isSelected ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 shadow-sm' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-colors ${isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>{char[0]}</div>
-                            <div>
-                              <span className={`font-bold block ${isSelected ? 'text-indigo-900 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200'}`}>{char}</span>
+                        <div key={char} className={`flex items-center justify-between p-2 border rounded-2xl transition-all w-full ${isSelected ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 shadow-sm' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+                          <button onClick={() => {
+                              const newSelection = isSelected ? selectedCharacters.filter(c => c !== char) : [...selectedCharacters, char];
+                              setSelectedCharacters(newSelection);
+                              updateProgress({ selectedCharacters: newSelection });
+                            }} 
+                            className="flex-1 flex items-center gap-4 text-left p-2"
+                          >
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-colors shrink-0 ${isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>{char[0]}</div>
+                            <div className="flex-1 min-w-0">
+                              <span className={`font-bold block truncate ${isSelected ? 'text-indigo-900 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200'}`}>{char}</span>
                               <span className="text-xs text-slate-400 dark:text-slate-500">({charCounts[char]} Replik)</span>
                             </div>
-                          </div>
-                          {isSelected && <Check className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mr-2" />}
-                        </button>
+                            {isSelected && <Check className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mr-2 shrink-0" />}
+                          </button>
+                          <button onClick={() => removeCharacter(char)} className="p-3 text-slate-400 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0">
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -709,7 +772,7 @@ const App = () => {
                       
                       {selectedCharacters.includes(script[currentIndex].character) && !isLocked ? (
                         <div className="space-y-6 w-full">
-                          <div className={`${getFontSizeClass()} font-serif italic transition-all duration-700 ${isRevealed ? 'opacity-100 blur-0' : 'opacity-0 blur-xl absolute invisible'}`}>
+                          <div className={`${getFontSizeClass()} ${getFontFamilyClass()} italic transition-all duration-700 ${isRevealed ? 'opacity-100 blur-0' : 'opacity-0 blur-xl absolute invisible'}`}>
                             "{script[currentIndex].text}"
                           </div>
                           
@@ -734,7 +797,7 @@ const App = () => {
                           )}
                         </div>
                       ) : (
-                        <div className={`${getFontSizeClass()} text-slate-800 dark:text-slate-200 leading-relaxed font-medium animate-in fade-in transition-all duration-500`}>
+                        <div className={`${getFontSizeClass()} ${getFontFamilyClass()} text-slate-800 dark:text-slate-200 leading-relaxed font-medium animate-in fade-in transition-all duration-500`}>
                           "{script[currentIndex].text}"
                         </div>
                       )}
@@ -788,19 +851,24 @@ const App = () => {
                     {characters.map(char => {
                        const isSelected = selectedCharacters.includes(char);
                        return (
-                         <button key={char} onClick={() => {
-                            const newSelection = isSelected ? selectedCharacters.filter(c => c !== char) : [...selectedCharacters, char];
-                            setSelectedCharacters(newSelection);
-                            updateProgress({ selectedCharacters: newSelection });
-                          }} 
-                          className={`w-full text-left p-4 rounded-2xl font-bold transition-all flex justify-between items-center ${isSelected ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}
-                         >
-                            <div className="flex items-center gap-2">
-                              <span>{char}</span>
-                              <span className={`text-xs font-normal ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>({charCounts[char]} Replik)</span>
-                            </div>
-                            {isSelected && <Check className="w-5 h-5"/>}
-                         </button>
+                         <div key={char} className={`flex items-center justify-between p-2 border rounded-2xl transition-all w-full ${isSelected ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 shadow-sm' : 'border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800'}`}>
+                           <button onClick={() => {
+                              const newSelection = isSelected ? selectedCharacters.filter(c => c !== char) : [...selectedCharacters, char];
+                              setSelectedCharacters(newSelection);
+                              updateProgress({ selectedCharacters: newSelection });
+                            }} 
+                            className="flex-1 flex justify-between items-center text-left p-2"
+                           >
+                              <div className="flex items-center gap-2">
+                                <span className={isSelected ? 'text-indigo-900 dark:text-indigo-300 font-bold' : 'text-slate-700 dark:text-slate-300 font-bold'}>{char}</span>
+                                <span className={`text-xs font-normal ${isSelected ? 'text-indigo-500 dark:text-indigo-400' : 'text-slate-400'}`}>({charCounts[char]} Replik)</span>
+                              </div>
+                              {isSelected && <Check className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mr-2"/>}
+                           </button>
+                           <button onClick={() => removeCharacter(char)} className="p-3 text-slate-400 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0">
+                             <Trash2 className="w-5 h-5" />
+                           </button>
+                         </div>
                        )
                     })}
                  </div>
