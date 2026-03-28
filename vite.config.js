@@ -9,11 +9,11 @@ export default defineConfig({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,docx,txt}'] // Çevrimdışı çalışması için önbelleğe alınacak dosyalar
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,docx,txt}']
       },
       manifest: {
-        name: 'Sahne Ezber',
-        short_name: 'Sahne Ezber',
+        name: 'Sufle',
+        short_name: 'Sufle',
         description: 'Tiyatro replik ezberleme asistanı',
         theme_color: '#4f46e5',
         background_color: '#ffffff',
