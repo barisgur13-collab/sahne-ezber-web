@@ -102,6 +102,9 @@ const App = () => {
   const [hintUsed, setHintUsed] = useState(false);
   const [showTenStreakEffect, setShowTenStreakEffect] = useState(false);
 
+  // SİLME ONAYI STATE
+  const [projectToDelete, setProjectToDelete] = useState(null);
+
   // AYARLAR (LOCAL STORAGE)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('sufle_settings');
@@ -115,12 +118,20 @@ const App = () => {
 
   const timerRef = useRef(null);
   const mammothRef = useRef(null);
+  const activeLineRef = useRef(null); // Yan menü senkronizasyonu için
+
+  // Yan menü açıldığında veya aktif indeks değiştiğinde otomatik kaydır
+  useEffect(() => {
+    if (isSidebarOpen && activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentIndex, isSidebarOpen]);
 
   // Ayarları Kaydet ve HTML tag'ine uygula
   useEffect(() => {
     localStorage.setItem('sufle_settings', JSON.stringify(settings));
     
-    // Koyu modu direkt HTML etiketine uygula (Kesin çözüm)
+    // Koyu modu direkt HTML etiketine uygula
     if (settings.darkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -255,10 +266,15 @@ const App = () => {
     saveProjectDB({ ...project, lastAccessed: Date.now() });
   };
 
-  const handleDeleteProject = async (e, id) => {
+  const confirmDelete = (e, id) => {
     e.stopPropagation();
+    setProjectToDelete(id);
+  };
+
+  const handleDeleteProject = async (id) => {
     await deleteProjectDB(id);
     setProjects(prev => prev.filter(p => p.id !== id));
+    setProjectToDelete(null);
   };
 
   const handleFileUpload = async (e) => {
@@ -319,10 +335,10 @@ const App = () => {
   };
 
   const handleNextClick = () => {
-    if (isLocked) return;
+    if (isLocked && isAutoPlaying) return; // Sadece akış açıkken ve kilitliyken butonu devre dışı bırak
     const currentLine = script[currentIndex];
     
-    if (selectedCharacters.includes(currentLine.character) && !isRevealed) {
+    if (selectedCharacters.includes(currentLine.character) && !isRevealed && !isLocked) {
       setIsRevealed(true);
       setIsHintVisible(false);
       if (!hintUsed) {
@@ -335,6 +351,7 @@ const App = () => {
 
   const handlePrevClick = () => {
     if (currentIndex > 0) {
+      if (isLocked && isAutoPlaying) return; // Sadece akış açıkken ve kilitliyken butonu devre dışı bırak
       const prevIndex = currentIndex - 1;
       setIsHintVisible(false);
       setHintUsed(false);
@@ -349,7 +366,6 @@ const App = () => {
     setSelectedCharacters(prev => prev.filter(c => c !== name));
     setScript(prev => prev.map(l => l.character === name ? {...l, character: 'BİLGİ'} : l));
     
-    // Aktif proje açıksa hafızadaki karakter listesini de güncelle
     if (activeProject) {
       const newChars = characters.filter(c => c !== name);
       const newSelected = selectedCharacters.filter(c => c !== name);
@@ -456,7 +472,6 @@ const App = () => {
           </div>
           
           <div className="space-y-6">
-            {/* Tema */}
             <div className="flex justify-between items-center">
               <div>
                 <p className="font-bold">Koyu Mod</p>
@@ -467,7 +482,6 @@ const App = () => {
               </button>
             </div>
 
-            {/* Titreşim */}
             <div className="flex justify-between items-center">
               <div>
                 <p className="font-bold">Titreşim (Haptic)</p>
@@ -478,7 +492,6 @@ const App = () => {
               </button>
             </div>
 
-            {/* Font Boyutu */}
             <div>
               <p className="font-bold mb-2">Okuma Metni Boyutu</p>
               <div className="flex gap-2">
@@ -494,13 +507,12 @@ const App = () => {
               </div>
             </div>
 
-            {/* Font Tipi */}
             <div>
               <p className="font-bold mb-2">Metin Fontu</p>
               <div className="flex gap-2">
                 {[
-                  { id: 'sans', label: 'Düz (Sans)' },
-                  { id: 'serif', label: 'Kitap (Serif)' },
+                  { id: 'sans', label: 'Düz' },
+                  { id: 'serif', label: 'Kitap' },
                   { id: 'mono', label: 'Daktilo' }
                 ].map(font => (
                   <button 
@@ -514,7 +526,6 @@ const App = () => {
               </div>
             </div>
 
-            {/* Öğretici */}
             <button onClick={() => { setIsSettingsOpen(false); setTutorialStep(0); setShowTutorial(true); }} className="w-full flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 py-3 rounded-xl font-bold hover:bg-indigo-100 dark:hover:bg-indigo-800 transition-colors">
               <Info className="w-5 h-5"/> Öğreticiyi Tekrar Göster
             </button>
@@ -524,7 +535,6 @@ const App = () => {
     );
   };
 
-  // ANA RENDER
   return (
     <div className={`${settings.darkMode ? 'dark' : ''}`}>
       <style>{`
@@ -536,6 +546,23 @@ const App = () => {
         
         {renderTutorial()}
         {renderSettings()}
+
+        {/* Silme Onayı Modalı */}
+        {projectToDelete && (
+          <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+             <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center">
+                <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                   <Trash2 className="w-8 h-8"/>
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Metni Sil</h3>
+                <p className="text-slate-600 dark:text-slate-400 mb-6">Bu metni kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.</p>
+                <div className="flex gap-3">
+                   <button onClick={() => setProjectToDelete(null)} className="flex-1 py-3 rounded-xl font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">İptal</button>
+                   <button onClick={() => handleDeleteProject(projectToDelete)} className="flex-1 py-3 rounded-xl font-bold bg-rose-500 hover:bg-rose-600 text-white transition-colors">Evet, Sil</button>
+                </div>
+             </div>
+          </div>
+        )}
 
         {mode === 'splash' && (
           <div className="fixed inset-0 z-50 bg-indigo-600 flex flex-col items-center justify-center text-white">
@@ -599,7 +626,7 @@ const App = () => {
                             </p>
                           </div>
                         </div>
-                        <button onClick={(e) => handleDeleteProject(e, project.id)} className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0 ml-2">
+                        <button onClick={(e) => confirmDelete(e, project.id)} className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0 ml-2">
                           <Trash2 className="w-5 h-5" />
                         </button>
                       </div>
@@ -615,7 +642,6 @@ const App = () => {
         {mode !== 'splash' && mode !== 'library' && (
           <div className="max-w-2xl mx-auto bg-white dark:bg-slate-800 rounded-3xl shadow-xl overflow-hidden border border-slate-100 dark:border-slate-700 relative">
             
-            {/* 10 Seri Patlama Efekti */}
             {showTenStreakEffect && (
               <div className="absolute inset-0 z-50 pointer-events-none flex items-center justify-center animate-in fade-in zoom-in duration-500">
                 <Flame className="w-64 h-64 text-orange-500 opacity-20 animate-ping absolute" />
@@ -623,11 +649,11 @@ const App = () => {
               </div>
             )}
 
-            {/* Header */}
+            {/* Header - Sufle isimlendirmesi düzeltildi */}
             <div className="bg-indigo-600 p-6 text-white flex justify-between items-center z-10 relative shadow-md">
               <div className="flex flex-col min-w-0 flex-1 mr-4">
                 <h1 className="text-xl font-bold flex items-center gap-2 truncate">
-                  {mode !== 'input' ? activeProject?.title : 'Yeni Metin Ekle'}
+                  <BookOpen className="w-5 h-5 shrink-0"/> {mode !== 'input' ? (activeProject?.title || 'Sufle') : 'Sufle - Yeni Metin'}
                 </h1>
                 {mode !== 'input' && (
                   <p className="text-indigo-200 text-xs font-medium mt-1 truncate">
@@ -726,7 +752,6 @@ const App = () => {
               {mode === 'practice' && script[currentIndex] && (
                 <div className="space-y-4 animate-in fade-in duration-300">
                   
-                  {/* Controls Section */}
                   <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-600 space-y-4">
                     <div className="flex items-center justify-between">
                        <button onClick={() => setIsAutoPlaying(!isAutoPlaying)} className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all ${isAutoPlaying ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>
@@ -749,14 +774,12 @@ const App = () => {
                     </div>
                   </div>
 
-                  {/* Progress Bar */}
                   {showProgressBar && (
                     <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-2">
                       <div className="h-full bg-indigo-500 ease-linear" style={{ width: `${progress}%`, transitionDuration: progress === 100 ? `${getTotalDelay(currentIndex)}ms` : '0ms' }} />
                     </div>
                   )}
 
-                  {/* Main Script Area */}
                   <div className="min-h-[280px] flex flex-col gap-4">
                     {selectedCharacters.includes(script[currentIndex].character) && currentIndex > 0 && !isLocked && !isRevealed && (
                       <div className="animate-in slide-in-from-top-2 bg-indigo-50 dark:bg-indigo-900/20 border-l-4 border-indigo-400 p-4 rounded-r-2xl shadow-sm">
@@ -804,11 +827,11 @@ const App = () => {
                     </div>
                   </div>
 
-                  {/* Action Bar */}
                   <div className="flex gap-2">
+                    {/* Manuel Gezinme İzinleri Düzeltildi */}
                     <button 
                       onClick={handlePrevClick} 
-                      disabled={currentIndex === 0 || isLocked} 
+                      disabled={currentIndex === 0 || (isLocked && isAutoPlaying)} 
                       className="w-16 flex items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0"
                       title="Bir Önceki Replik"
                     >
@@ -817,10 +840,10 @@ const App = () => {
                     
                     <button
                       onClick={handleNextClick}
-                      disabled={isLocked}
+                      disabled={isLocked && isAutoPlaying}
                       className={`flex-1 py-5 rounded-3xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95 min-w-0 ${
-                        isLocked ? 'bg-slate-100 dark:bg-slate-700 text-slate-300 dark:text-slate-500 shadow-none cursor-not-allowed' :
-                        (selectedCharacters.includes(script[currentIndex].character) && !isRevealed ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700')
+                        (isLocked && isAutoPlaying) ? 'bg-slate-100 dark:bg-slate-700 text-slate-300 dark:text-slate-500 shadow-none cursor-not-allowed' :
+                        (selectedCharacters.includes(script[currentIndex].character) && !isRevealed && !isLocked ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700')
                       }`}
                     >
                       {currentIndex === script.length - 1 && (isRevealed || isLocked) ? 'EZBERİ BİTİR' : 
@@ -840,7 +863,6 @@ const App = () => {
               )}
             </div>
 
-            {/* Karakter Değiştirme Modalı */}
             {isCharModalOpen && (
               <div className="absolute inset-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm flex flex-col p-6 animate-in fade-in zoom-in-95 duration-200">
                  <div className="flex justify-between items-center mb-6">
@@ -879,7 +901,6 @@ const App = () => {
           </div>
         )}
 
-        {/* Yan Menü (Sidebar) */}
         {isSidebarOpen && <div className="fixed inset-0 bg-slate-900/50 z-40 backdrop-blur-sm transition-opacity" onClick={() => setIsSidebarOpen(false)} />}
         <div className={`fixed top-0 right-0 w-80 h-full bg-slate-50 dark:bg-slate-900 shadow-2xl z-50 transform transition-transform duration-300 flex flex-col ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           <div className="p-4 bg-indigo-600 text-white flex justify-between items-center shadow-md">
@@ -891,7 +912,10 @@ const App = () => {
               const isMyRole = selectedCharacters.includes(line.character);
               const isCurrent = idx === currentIndex;
               return (
-                <button key={idx} onClick={() => {
+                <button 
+                  key={idx} 
+                  ref={isCurrent ? activeLineRef : null} // Otomatik kaydırma referansı
+                  onClick={() => {
                     setCurrentIndex(idx); setIsRevealed(false); setIsHintVisible(false); setHintUsed(false); setIsSidebarOpen(false); updateProgress({ currentIndex: idx });
                   }}
                   className={`w-full text-left p-3 rounded-2xl border transition-all ${isCurrent ? 'border-indigo-500 bg-indigo-100 dark:bg-indigo-900/30 shadow-sm' : isMyRole ? 'border-indigo-100 dark:border-indigo-800/50 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
