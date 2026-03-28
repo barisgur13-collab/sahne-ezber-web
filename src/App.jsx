@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, Play, ChevronRight, ChevronLeft, Trash2, 
   BookOpen, FastForward, Pause, HelpCircle, 
-  Lock, Unlock, Timer, Check, List, X, Lightbulb, Zap, Loader2, Users, Plus, FolderOpen, Flame, Settings, Info
+  Lock, Unlock, Timer, Check, List, X, Lightbulb, Zap, Loader2, Users, Plus, FolderOpen, Flame, Settings, Info, Mic, Volume2, BarChart
 } from 'lucide-react';
 
 const MAMMOTH_URL = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js";
+const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
 
 // --- ÇEVRİMDIŞI HAFIZA (INDEXEDDB) KURULUMU ---
 const DB_NAME = 'SufleDB';
@@ -53,7 +55,7 @@ const deleteProjectDB = async (id) => {
 const getCharCounts = (script) => {
   const counts = {};
   script.forEach(l => {
-    if(l.character !== 'BİLGİ') counts[l.character] = (counts[l.character] || 0) + 1;
+    if(l.character !== 'BİLGİ' && l.character !== 'BÖLÜM') counts[l.character] = (counts[l.character] || 0) + 1;
   });
   return counts;
 };
@@ -62,7 +64,7 @@ const getCharOccurrences = (script) => {
   const occurrences = [];
   const current = {};
   script.forEach(l => {
-    if(l.character !== 'BİLGİ') {
+    if(l.character !== 'BİLGİ' && l.character !== 'BÖLÜM') {
       current[l.character] = (current[l.character] || 0) + 1;
       occurrences.push(current[l.character]);
     } else {
@@ -70,6 +72,16 @@ const getCharOccurrences = (script) => {
     }
   });
   return occurrences;
+};
+
+// Duygu notlarını ayıklayıp renklendiren yardımcı fonksiyon
+const formatEmotionText = (text) => {
+  const parts = text.split(/(\[[^\]]+\]|\([^\)]+\))/g);
+  return parts.map((part, i) => 
+    /^[\[\(].*[\]\)]$/.test(part) ? 
+      <span key={i} className="text-fuchsia-500 text-[0.75em] font-semibold mx-1 block md:inline mt-2 md:mt-0 opacity-80">{part}</span> : 
+      <span key={i}>{part}</span>
+  );
 };
 
 const App = () => {
@@ -95,8 +107,12 @@ const App = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCharModalOpen, setIsCharModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [speedLevel, setSpeedLevel] = useState(3); 
   
+  // YENİ: ZORLU REPLİKLER ANALİTİĞİ
+  const [analytics, setAnalytics] = useState({});
+
   // SERİ (STREAK) STATE'LERİ
   const [streak, setStreak] = useState(0);
   const [hintUsed, setHintUsed] = useState(false);
@@ -108,58 +124,95 @@ const App = () => {
   // AYARLAR (LOCAL STORAGE)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('sufle_settings');
-    const defaultSettings = { darkMode: false, fontSize: 'medium', fontFamily: 'sans', vibration: true, tutorialSeen: false };
+    const defaultSettings = { darkMode: false, fontSize: 'medium', fontFamily: 'sans', vibration: true, tutorialSeen: false, ttsEnabled: false, micEnabled: false };
     return saved ? { ...defaultSettings, ...JSON.parse(saved) } : defaultSettings;
   });
 
-  // ÖĞRETİCİ STATE
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
 
   const timerRef = useRef(null);
   const mammothRef = useRef(null);
-  const activeLineRef = useRef(null); // Yan menü senkronizasyonu için
+  const recognitionRef = useRef(null);
+  const activeLineRef = useRef(null); 
 
-  // Yan menü açıldığında veya aktif indeks değiştiğinde otomatik kaydır
   useEffect(() => {
     if (isSidebarOpen && activeLineRef.current) {
       activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [currentIndex, isSidebarOpen]);
 
-  // Ayarları Kaydet ve HTML tag'ine uygula
   useEffect(() => {
     localStorage.setItem('sufle_settings', JSON.stringify(settings));
-    
-    // Koyu modu direkt HTML etiketine uygula
-    if (settings.darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    if (settings.darkMode) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
   }, [settings]);
 
-  // Kütüphaneyi dinamik yükle
+  // Kütüphaneleri dinamik yükle (Mammoth ve PDF.js)
   useEffect(() => {
-    const scriptTag = document.createElement('script');
-    scriptTag.src = MAMMOTH_URL;
-    scriptTag.async = true;
-    scriptTag.onload = () => { mammothRef.current = window.mammoth; };
-    document.body.appendChild(scriptTag);
-    return () => { if (document.body.contains(scriptTag)) document.body.removeChild(scriptTag); };
+    const mScript = document.createElement('script');
+    mScript.src = MAMMOTH_URL;
+    mScript.async = true;
+    mScript.onload = () => { mammothRef.current = window.mammoth; };
+    document.body.appendChild(mScript);
+
+    const pScript = document.createElement('script');
+    pScript.src = PDFJS_URL;
+    pScript.async = true;
+    pScript.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL; };
+    document.body.appendChild(pScript);
+
+    return () => { 
+      if (document.body.contains(mScript)) document.body.removeChild(mScript); 
+      if (document.body.contains(pScript)) document.body.removeChild(pScript); 
+    };
   }, []);
 
-  // Yükleme Ekranı (Splash) ve Veritabanı Okuma
+  // YENİ: Ses Tanıma (Mikrofon) Kurulumu
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (settings.micEnabled && SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.lang = 'tr-TR';
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = false;
+
+      recognitionRef.current.onresult = (event) => {
+        const last = event.results.length - 1;
+        const command = event.results[last][0].transcript.trim().toLowerCase();
+        
+        if (command.includes('sonraki') || command.includes('geç') || command.includes('devam')) {
+           handleNextClick();
+        } else if (command.includes('ipucu') || command.includes('yardım')) {
+           setIsHintVisible(true);
+           setHintUsed(true);
+           setStreak(0);
+           setAnalytics(prev => ({...prev, [currentIndex]: (prev[currentIndex] || 0) + 1}));
+        }
+      };
+    }
+  }, [settings.micEnabled, currentIndex, isLocked]);
+
+  // Mikrofonu sadece sıra sendeyken aç
+  useEffect(() => {
+    if (settings.micEnabled && recognitionRef.current && mode === 'practice') {
+      const isMyRole = selectedCharacters.includes(script[currentIndex]?.character);
+      if (isMyRole && !isRevealed && !isAutoPlaying) {
+        try { recognitionRef.current.start(); } catch(e){}
+      } else {
+        try { recognitionRef.current.stop(); } catch(e){}
+      }
+    }
+  }, [currentIndex, isRevealed, selectedCharacters, settings.micEnabled, mode, isAutoPlaying]);
+
+
   useEffect(() => {
     const loadInitialData = async () => {
       const savedProjects = await getAllProjects();
       setProjects(savedProjects.sort((a, b) => b.lastAccessed - a.lastAccessed));
-      
       setTimeout(() => {
         setMode('library');
-        if (!settings.tutorialSeen) {
-          setShowTutorial(true);
-        }
+        if (!settings.tutorialSeen) setShowTutorial(true);
       }, 2000);
     };
     if (mode === 'splash') loadInitialData();
@@ -195,10 +248,11 @@ const App = () => {
     const knownCharacters = new Set();
     const separatorRegex = /^([A-ZÇĞİÖŞÜa-zçğıöşü0-9\s\(\)\[\]\.]{2,35}?)\s*[:\-\u2013\u2014]\s*(.*)/;
     const allCapsRegex = /^([A-ZÇĞİÖŞÜ0-9\s\(\)\[\]\.]{2,35})$/;
+    const sceneRegex = /^(?:(?:[0-9]+\.?\s*)?(?:SAHNE|PERDE)(?:\s*[0-9]+)?|[IVX]+\.\s*(?:SAHNE|PERDE))/i;
 
     rawLines.forEach(line => {
       let nameMatch = line.match(separatorRegex) || line.match(allCapsRegex);
-      if (nameMatch) {
+      if (nameMatch && !sceneRegex.test(line)) {
         let name = (nameMatch[1] || nameMatch[0]).toUpperCase().trim();
         if (name.split(/\s+/).length <= 5 && !/^\d+$/.test(name)) knownCharacters.add(name);
       }
@@ -210,6 +264,14 @@ const App = () => {
     let currentText = [];
 
     rawLines.forEach(line => {
+      // YENİ: Sahne/Perde Bölüm Tespiti
+      if (sceneRegex.test(line)) {
+        if (currentText.length > 0) parsed.push({ character: currentCharacter, text: currentText.join(' ') });
+        currentCharacter = 'BÖLÜM';
+        currentText = [line.toUpperCase()];
+        return;
+      }
+
       let foundName = null;
       let speech = null;
       for (const name of sortedNames) {
@@ -218,6 +280,7 @@ const App = () => {
         let match = line.match(regex);
         if (match) { foundName = match[1].toUpperCase().trim(); speech = match[2].trim(); break; }
       }
+
       if (foundName) {
         if (currentText.length > 0) parsed.push({ character: currentCharacter, text: currentText.join(' ') });
         currentCharacter = foundName;
@@ -229,7 +292,7 @@ const App = () => {
 
     if (currentText.length > 0) parsed.push({ character: currentCharacter, text: currentText.join(' ') });
 
-    const uniqueChars = [...new Set(parsed.map(p => p.character))].filter(c => c !== 'BİLGİ');
+    const uniqueChars = [...new Set(parsed.map(p => p.character))].filter(c => c !== 'BİLGİ' && c !== 'BÖLÜM');
     
     const newProject = {
       id: Date.now().toString(),
@@ -257,6 +320,8 @@ const App = () => {
     setIsAutoPlaying(false);
     setStreak(0);
     setHintUsed(false);
+    setAnalytics({});
+    window.speechSynthesis.cancel();
     
     if (!project.selectedCharacters || project.selectedCharacters.length === 0) {
       setMode('select');
@@ -264,11 +329,6 @@ const App = () => {
       setMode('practice');
     }
     saveProjectDB({ ...project, lastAccessed: Date.now() });
-  };
-
-  const confirmDelete = (e, id) => {
-    e.stopPropagation();
-    setProjectToDelete(id);
   };
 
   const handleDeleteProject = async (id) => {
@@ -280,9 +340,10 @@ const App = () => {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if(!newProjectTitle) setNewProjectTitle(file.name.replace(/\.(txt|docx)$/, ''));
+    if(!newProjectTitle) setNewProjectTitle(file.name.replace(/\.(txt|docx|pdf)$/, ''));
 
     const reader = new FileReader();
+    
     if (file.name.endsWith('.docx')) {
       if (!mammothRef.current) return;
       reader.onload = async (ev) => {
@@ -290,6 +351,19 @@ const App = () => {
         setInputText(result.value.replace(/\u000B/g, '\n'));
       };
       reader.readAsArrayBuffer(file);
+    } else if (file.name.endsWith('.pdf')) {
+      // YENİ: PDF Okuma Algoritması
+      if (!window.pdfjsLib) return;
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map(item => item.str);
+        fullText += strings.join(' ') + '\n';
+      }
+      setInputText(fullText);
     } else {
       reader.onload = (ev) => setInputText(ev.target.result);
       reader.readAsText(file);
@@ -302,6 +376,7 @@ const App = () => {
     setIsHintVisible(false);
     setStreak(0);
     setHintUsed(false);
+    setAnalytics({});
     updateProgress({ currentIndex: 0, selectedCharacters });
     setMode('practice');
     setIsAutoPlaying(true);
@@ -312,14 +387,23 @@ const App = () => {
     setStreak(newStreak);
     if (newStreak % 10 === 0) {
       setShowTenStreakEffect(true);
-      if (settings.vibration && navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]); 
-      }
+      if (settings.vibration && navigator.vibrate) navigator.vibrate([200, 100, 200]); 
       setTimeout(() => setShowTenStreakEffect(false), 2000);
     }
   };
 
+  const speakLine = (text) => {
+    if (!settings.ttsEnabled) return;
+    window.speechSynthesis.cancel();
+    // Parantez içindeki duygu notlarını sesten temizle
+    const cleanText = text.replace(/\[.*?\]|\(.*?\)/g, '');
+    const ut = new SpeechSynthesisUtterance(cleanText);
+    ut.lang = 'tr-TR';
+    window.speechSynthesis.speak(ut);
+  };
+
   const moveToNext = () => {
+    window.speechSynthesis.cancel();
     if (currentIndex < script.length - 1) {
       const nextIndex = currentIndex + 1;
       const nextLine = script[nextIndex];
@@ -335,15 +419,13 @@ const App = () => {
   };
 
   const handleNextClick = () => {
-    if (isLocked && isAutoPlaying) return; // Sadece akış açıkken ve kilitliyken butonu devre dışı bırak
+    if (isLocked && isAutoPlaying) return; 
     const currentLine = script[currentIndex];
     
     if (selectedCharacters.includes(currentLine.character) && !isRevealed && !isLocked) {
       setIsRevealed(true);
       setIsHintVisible(false);
-      if (!hintUsed) {
-        handleStreakIncrease();
-      }
+      if (!hintUsed) handleStreakIncrease();
     } else {
       moveToNext();
     }
@@ -351,7 +433,8 @@ const App = () => {
 
   const handlePrevClick = () => {
     if (currentIndex > 0) {
-      if (isLocked && isAutoPlaying) return; // Sadece akış açıkken ve kilitliyken butonu devre dışı bırak
+      if (isLocked && isAutoPlaying) return; 
+      window.speechSynthesis.cancel();
       const prevIndex = currentIndex - 1;
       setIsHintVisible(false);
       setHintUsed(false);
@@ -365,7 +448,6 @@ const App = () => {
     setCharacters(prev => prev.filter(c => c !== name));
     setSelectedCharacters(prev => prev.filter(c => c !== name));
     setScript(prev => prev.map(l => l.character === name ? {...l, character: 'BİLGİ'} : l));
-    
     if (activeProject) {
       const newChars = characters.filter(c => c !== name);
       const newSelected = selectedCharacters.filter(c => c !== name);
@@ -375,37 +457,37 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (mode === 'practice' && isAutoPlaying && script[currentIndex]) {
+    if (mode === 'practice' && script[currentIndex]) {
       const currentLine = script[currentIndex];
       const isMyRole = selectedCharacters.includes(currentLine.character);
+      
+      // Sesli okuma kontrolü (Sadece seninki değilse ve bilgi/bölüm değilse)
+      if (isAutoPlaying && !isMyRole && currentLine.character !== 'BİLGİ' && currentLine.character !== 'BÖLÜM') {
+        speakLine(currentLine.text);
+      }
+
       const shouldAutoProgress = isLocked || (!isMyRole) || (isMyRole && isRevealed);
 
-      if (shouldAutoProgress) {
+      if (isAutoPlaying && shouldAutoProgress) {
         const dynamicDelay = getTotalDelay(currentIndex);
         setProgress(0);
         const pTimer = setTimeout(() => setProgress(100), 50);
 
         if (timerRef.current) clearTimeout(timerRef.current);
         timerRef.current = setTimeout(() => {
-          if (!hintUsed && isMyRole) {
-            handleStreakIncrease();
-          }
+          if (!hintUsed && isMyRole) handleStreakIncrease();
           moveToNext();
         }, dynamicDelay);
 
-        return () => {
-          clearTimeout(pTimer);
-          if (timerRef.current) clearTimeout(timerRef.current);
-        };
+        return () => { clearTimeout(pTimer); if (timerRef.current) clearTimeout(timerRef.current); };
       } else {
         setProgress(0);
         if (timerRef.current) clearTimeout(timerRef.current);
       }
     }
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [currentIndex, isAutoPlaying, mode, speedLevel, selectedCharacters, isRevealed, isLocked, hintUsed]);
+  }, [currentIndex, isAutoPlaying, mode, speedLevel, selectedCharacters, isRevealed, isLocked, hintUsed, settings.ttsEnabled]);
 
-  // Önceden hesaplanmış sayaçlar
   const charCounts = getCharCounts(script);
   const charOccurrences = getCharOccurrences(script);
 
@@ -421,13 +503,12 @@ const App = () => {
     return 'font-sans';
   };
 
-  // Öğretici Adımları
   const tutorialData = [
     { icon: <BookOpen className="w-12 h-12 text-indigo-500 mb-4 mx-auto"/>, title: "Sufle'ye Hoş Geldin!", desc: "Sufle, tiyatro ve sahne repliklerini kolayca ezberlemen için tasarlanmış akıllı asistanındır." },
-    { icon: <Upload className="w-12 h-12 text-indigo-500 mb-4 mx-auto"/>, title: "Metin Ekle", desc: "Word (.docx) veya .txt uzantılı metinlerini yükleyebilir ya da doğrudan yapıştırabilirsin." },
+    { icon: <Upload className="w-12 h-12 text-indigo-500 mb-4 mx-auto"/>, title: "Metin Ekle", desc: "PDF, Word (.docx) veya .txt uzantılı metinlerini yükleyebilir ya da doğrudan yapıştırabilirsin." },
     { icon: <Users className="w-12 h-12 text-indigo-500 mb-4 mx-auto"/>, title: "Rolünü Seç", desc: "Sufle karakterleri otomatik tanır. Kendi rolünü (veya rollerini) seç." },
     { icon: <HelpCircle className="w-12 h-12 text-indigo-500 mb-4 mx-auto"/>, title: "Sıra Sende!", desc: "Akış başlar, diğer roller otomatik geçer. Senin sıranda durur. 'İpucu Al' diyebilir veya 'Cevabı Gör' diyerek kendini test edebilirsin." },
-    { icon: <Flame className="w-12 h-12 text-orange-500 mb-4 mx-auto"/>, title: "Seri (Alev) Sistemi", desc: "İpucu almadan kendi repliğini her bildiğinde serin artar. Her 10'da bir patlama yaşarsın! Hazırsan başlayalım." },
+    { icon: <Volume2 className="w-12 h-12 text-indigo-500 mb-4 mx-auto"/>, title: "Koçluk Özellikleri", desc: "Ayarlardan 'Sesli Okuma'yı açarak karşında biri varmış gibi dinleyebilir veya 'Mikrofon'u açıp 'Sonraki/İpucu' diyerek sesle komut verebilirsin." },
   ];
 
   const renderTutorial = () => {
@@ -447,10 +528,7 @@ const App = () => {
           <button 
             onClick={() => {
               if (tutorialStep < tutorialData.length - 1) setTutorialStep(prev => prev + 1);
-              else {
-                setShowTutorial(false);
-                setSettings({...settings, tutorialSeen: true});
-              }
+              else { setShowTutorial(false); setSettings({...settings, tutorialSeen: true}); }
             }}
             className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl hover:bg-indigo-700 transition-colors"
           >
@@ -465,13 +543,36 @@ const App = () => {
     if (!isSettingsOpen) return null;
     return (
       <div className="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl text-slate-800 dark:text-white">
-          <div className="flex justify-between items-center mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-md shadow-2xl text-slate-800 dark:text-white max-h-[90vh] overflow-y-auto">
+          <div className="flex justify-between items-center p-6 border-b border-slate-100 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
             <h2 className="text-xl font-bold flex items-center gap-2"><Settings className="w-5 h-5"/> Ayarlar</h2>
             <button onClick={() => setIsSettingsOpen(false)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200"><X className="w-5 h-5"/></button>
           </div>
           
-          <div className="space-y-6">
+          <div className="p-6 space-y-6">
+            {/* YENİ: Ses Ayarları */}
+            <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl space-y-4">
+              <h3 className="font-bold text-indigo-800 dark:text-indigo-300 text-xs uppercase tracking-wider mb-2">Koçluk Özellikleri</h3>
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="font-bold flex items-center gap-2"><Volume2 size={16}/> Sesli Okuma</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Karşı tarafın repliklerini okur</p>
+                </div>
+                <button onClick={() => setSettings({...settings, ttsEnabled: !settings.ttsEnabled})} className={`w-12 h-6 rounded-full transition-colors relative ${settings.ttsEnabled ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${settings.ttsEnabled ? 'left-7' : 'left-1'}`}/>
+                </button>
+              </div>
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="font-bold flex items-center gap-2"><Mic size={16}/> Sesle Kontrol</p>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">Mikrofonla "Geç" veya "İpucu" de</p>
+                </div>
+                <button onClick={() => setSettings({...settings, micEnabled: !settings.micEnabled})} className={`w-12 h-6 rounded-full transition-colors relative ${settings.micEnabled ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${settings.micEnabled ? 'left-7' : 'left-1'}`}/>
+                </button>
+              </div>
+            </div>
+
             <div className="flex justify-between items-center">
               <div>
                 <p className="font-bold">Koyu Mod</p>
@@ -496,11 +597,7 @@ const App = () => {
               <p className="font-bold mb-2">Okuma Metni Boyutu</p>
               <div className="flex gap-2">
                 {['small', 'medium', 'large'].map(size => (
-                  <button 
-                    key={size}
-                    onClick={() => setSettings({...settings, fontSize: size})}
-                    className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-colors ${settings.fontSize === size ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent border-slate-200 dark:border-slate-600'}`}
-                  >
+                  <button key={size} onClick={() => setSettings({...settings, fontSize: size})} className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-colors ${settings.fontSize === size ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent border-slate-200 dark:border-slate-600'}`}>
                     {size === 'small' ? 'Küçük' : size === 'medium' ? 'Orta' : 'Büyük'}
                   </button>
                 ))}
@@ -510,16 +607,8 @@ const App = () => {
             <div>
               <p className="font-bold mb-2">Metin Fontu</p>
               <div className="flex gap-2">
-                {[
-                  { id: 'sans', label: 'Düz' },
-                  { id: 'serif', label: 'Kitap' },
-                  { id: 'mono', label: 'Daktilo' }
-                ].map(font => (
-                  <button 
-                    key={font.id}
-                    onClick={() => setSettings({...settings, fontFamily: font.id})}
-                    className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-colors ${settings.fontFamily === font.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent border-slate-200 dark:border-slate-600'}`}
-                  >
+                {[ { id: 'sans', label: 'Düz' }, { id: 'serif', label: 'Kitap' }, { id: 'mono', label: 'Daktilo' } ].map(font => (
+                  <button key={font.id} onClick={() => setSettings({...settings, fontFamily: font.id})} className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-colors ${settings.fontFamily === font.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent border-slate-200 dark:border-slate-600'}`}>
                     {font.label}
                   </button>
                 ))}
@@ -529,6 +618,43 @@ const App = () => {
             <button onClick={() => { setIsSettingsOpen(false); setTutorialStep(0); setShowTutorial(true); }} className="w-full flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 py-3 rounded-xl font-bold hover:bg-indigo-100 dark:hover:bg-indigo-800 transition-colors">
               <Info className="w-5 h-5"/> Öğreticiyi Tekrar Göster
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // YENİ: Zorlu Replikler Modal'ı
+  const renderAnalyticsModal = () => {
+    if (!isAnalyticsOpen) return null;
+    const difficultLines = Object.entries(analytics).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    
+    return (
+      <div className="fixed inset-0 z-[100] bg-slate-900/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
+          <BarChart className="w-16 h-16 text-indigo-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 mb-2">Çalışma Raporu</h2>
+          
+          {difficultLines.length > 0 ? (
+            <div className="text-left mt-6 mb-8 space-y-4">
+              <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-2">Zorlandığın Replikler:</p>
+              {difficultLines.map(([indexStr, count]) => {
+                const idx = parseInt(indexStr);
+                return (
+                  <div key={idx} className="bg-slate-50 dark:bg-slate-700 p-3 rounded-xl border border-slate-100 dark:border-slate-600">
+                    <p className="text-xs text-rose-500 font-bold mb-1">{count} kez ipucu aldın</p>
+                    <p className="text-sm font-medium italic text-slate-700 dark:text-slate-200 line-clamp-2">"{script[idx].text}"</p>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-slate-600 dark:text-slate-300 mt-4 mb-8">Harika bir iş çıkardın! Hiç takılmadan ilerledin.</p>
+          )}
+
+          <div className="flex gap-3">
+             <button onClick={() => { setIsAnalyticsOpen(false); startPractice(); }} className="flex-1 py-3 rounded-xl font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors">Tekrar Dene</button>
+             <button onClick={() => { setIsAnalyticsOpen(false); setIsAutoPlaying(false); setMode('library'); }} className="flex-1 py-3 rounded-xl font-bold bg-indigo-600 text-white transition-colors">Menüye Dön</button>
           </div>
         </div>
       </div>
@@ -546,18 +672,16 @@ const App = () => {
         
         {renderTutorial()}
         {renderSettings()}
+        {renderAnalyticsModal()}
 
-        {/* Silme Onayı Modalı */}
         {projectToDelete && (
           <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
              <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center">
-                <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                   <Trash2 className="w-8 h-8"/>
-                </div>
+                <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4"><Trash2 className="w-8 h-8"/></div>
                 <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Metni Sil</h3>
                 <p className="text-slate-600 dark:text-slate-400 mb-6">Bu metni kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.</p>
                 <div className="flex gap-3">
-                   <button onClick={() => setProjectToDelete(null)} className="flex-1 py-3 rounded-xl font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">İptal</button>
+                   <button onClick={() => setProjectToDelete(null)} className="flex-1 py-3 rounded-xl font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors">İptal</button>
                    <button onClick={() => handleDeleteProject(projectToDelete)} className="flex-1 py-3 rounded-xl font-bold bg-rose-500 hover:bg-rose-600 text-white transition-colors">Evet, Sil</button>
                 </div>
              </div>
@@ -570,7 +694,7 @@ const App = () => {
             <h1 className="text-5xl font-black tracking-tighter">Sufle</h1>
             <Loader2 className="w-8 h-8 animate-spin mt-10 opacity-70" />
             <div className="absolute bottom-12 flex flex-col items-center opacity-80">
-              <span className="text-sm font-black tracking-[0.3em] uppercase bg-white/20 px-3 py-1 rounded-full mb-2">v1.2</span>
+              <span className="text-sm font-black tracking-[0.3em] uppercase bg-white/20 px-3 py-1 rounded-full mb-2">v1.3</span>
               <span className="text-xs font-medium tracking-widest text-indigo-200">BY BBG</span>
             </div>
           </div>
@@ -585,7 +709,7 @@ const App = () => {
                </div>
                <div className="flex gap-3 items-center">
                  <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><Settings className="w-5 h-5"/></button>
-                 <div className="text-xs font-bold bg-white/20 px-3 py-1 rounded-full">v1.2</div>
+                 <div className="text-xs font-bold bg-white/20 px-3 py-1 rounded-full">v1.3</div>
                </div>
             </div>
 
@@ -594,8 +718,7 @@ const App = () => {
                 onClick={() => { setMode('input'); setNewProjectTitle(''); setInputText(''); }}
                 className="w-full bg-white dark:bg-slate-800 border-2 border-dashed border-indigo-200 dark:border-indigo-500/30 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all text-indigo-600 dark:text-indigo-400 p-6 rounded-3xl flex flex-col items-center justify-center gap-2 font-bold shadow-sm"
               >
-                <Plus className="w-8 h-8" />
-                Yeni Metin Ekle
+                <Plus className="w-8 h-8" /> Yeni Metin Ekle
               </button>
 
               {projects.length === 0 ? (
@@ -613,9 +736,7 @@ const App = () => {
                           <div className="min-w-0 flex-1">
                             {project.title.length > 18 ? (
                               <div className="marquee-container h-7 w-full overflow-hidden">
-                                <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg marquee-content">
-                                  {project.title} &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; {project.title}
-                                </h3>
+                                <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg marquee-content">{project.title} &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; {project.title}</h3>
                               </div>
                             ) : (
                               <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg truncate w-full" title={project.title}>{project.title}</h3>
@@ -626,9 +747,7 @@ const App = () => {
                             </p>
                           </div>
                         </div>
-                        <button onClick={(e) => confirmDelete(e, project.id)} className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0 ml-2">
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                        <button onClick={(e) => confirmDelete(e, project.id)} className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0 ml-2"><Trash2 className="w-5 h-5" /></button>
                       </div>
                     )
                   })}
@@ -638,7 +757,6 @@ const App = () => {
           </div>
         )}
 
-        {/* ANA EKRANLAR (INPUT, SELECT, PRACTICE) */}
         {mode !== 'splash' && mode !== 'library' && (
           <div className="max-w-2xl mx-auto bg-white dark:bg-slate-800 rounded-3xl shadow-xl overflow-hidden border border-slate-100 dark:border-slate-700 relative">
             
@@ -649,7 +767,6 @@ const App = () => {
               </div>
             )}
 
-            {/* Header - Sufle isimlendirmesi düzeltildi */}
             <div className="bg-indigo-600 p-6 text-white flex justify-between items-center z-10 relative shadow-md">
               <div className="flex flex-col min-w-0 flex-1 mr-4">
                 <h1 className="text-xl font-bold flex items-center gap-2 truncate">
@@ -665,24 +782,13 @@ const App = () => {
               <div className="flex gap-1 shrink-0">
                 {mode === 'practice' && streak >= 3 && (
                   <div className="flex items-center gap-1 bg-orange-500/20 px-3 py-1 rounded-full font-bold text-xs animate-bounce border border-orange-500/30 mr-2 text-orange-100">
-                    <Flame size={14} className="fill-orange-400" />
-                    <span>{streak} Seri</span>
+                    <Flame size={14} className="fill-orange-400" /> <span>{streak} Seri</span>
                   </div>
                 )}
-                {mode === 'practice' && (
-                  <button onClick={() => setIsCharModalOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors" title="Karakter Değiştir">
-                    <Users className="w-5 h-5" />
-                  </button>
-                )}
+                {mode === 'practice' && <button onClick={() => setIsCharModalOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><Users className="w-5 h-5" /></button>}
                 <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><Settings className="w-5 h-5" /></button>
-                {mode !== 'input' && (
-                  <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors" title="Sahne Akışı">
-                    <List className="w-5 h-5" />
-                  </button>
-                )}
-                <button onClick={() => { setIsAutoPlaying(false); setMode('library'); }} className="p-2 hover:bg-white/20 rounded-full transition-colors" title="Kütüphaneye Dön">
-                  <X className="w-5 h-5" />
-                </button>
+                {mode !== 'input' && <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><List className="w-5 h-5" /></button>}
+                <button onClick={() => { setIsAutoPlaying(false); window.speechSynthesis.cancel(); setMode('library'); }} className="p-2 hover:bg-white/20 rounded-full transition-colors"><X className="w-5 h-5" /></button>
               </div>
             </div>
 
@@ -690,27 +796,22 @@ const App = () => {
               {mode === 'input' && (
                 <div className="space-y-4 animate-in fade-in duration-500">
                   <input 
-                    type="text" 
-                    placeholder="Metin Başlığı (Örn: Hamlet 1. Perde)" 
-                    value={newProjectTitle}
-                    onChange={(e) => setNewProjectTitle(e.target.value)}
+                    type="text" placeholder="Metin Başlığı (Örn: Hamlet 1. Perde)" 
+                    value={newProjectTitle} onChange={(e) => setNewProjectTitle(e.target.value)}
                     className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-indigo-500 font-bold text-slate-800 dark:text-slate-100 outline-none"
                   />
                   <div className="text-center p-6 border-2 border-dashed border-slate-200 dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-800/50 relative overflow-hidden group">
                     <Upload className="w-10 h-10 text-indigo-400 mx-auto mb-3" />
-                    <p className="text-slate-600 dark:text-slate-400 mb-3 text-sm">Senaryo dosyasını yükle (.txt / .docx)</p>
-                    <input type="file" accept=".txt,.docx" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                    <p className="text-slate-600 dark:text-slate-400 mb-3 text-sm">Senaryo dosyasını yükle (.pdf / .docx / .txt)</p>
+                    <input type="file" accept=".txt,.docx,.pdf" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                     <div className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-medium inline-block group-hover:bg-indigo-700 transition-colors">Dosya Seç</div>
                   </div>
                   <textarea
                     className="w-full h-40 p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm dark:text-slate-200"
                     placeholder="Veya buraya yapıştır...&#10;HAMLET: Olmak ya da olmamak..."
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
+                    value={inputText} onChange={(e) => setInputText(e.target.value)}
                   />
-                  <button onClick={() => parseScript(inputText)} disabled={!inputText.trim()} className="w-full bg-slate-900 dark:bg-black text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all disabled:opacity-50">
-                    <Play className="w-5 h-5" /> İleri
-                  </button>
+                  <button onClick={() => parseScript(inputText)} disabled={!inputText.trim()} className="w-full bg-slate-900 dark:bg-black text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all disabled:opacity-50"><Play className="w-5 h-5" /> İleri</button>
                 </div>
               )}
 
@@ -736,16 +837,12 @@ const App = () => {
                             </div>
                             {isSelected && <Check className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mr-2 shrink-0" />}
                           </button>
-                          <button onClick={() => removeCharacter(char)} className="p-3 text-slate-400 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0">
-                            <Trash2 className="w-5 h-5" />
-                          </button>
+                          <button onClick={() => removeCharacter(char)} className="p-3 text-slate-400 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0"><Trash2 className="w-5 h-5" /></button>
                         </div>
                       );
                     })}
                   </div>
-                  <button onClick={startPractice} disabled={selectedCharacters.length === 0} className="w-full bg-indigo-600 text-white py-4 rounded-3xl font-bold text-lg shadow-lg active:scale-95 transition-all disabled:opacity-50">
-                    Ezbere Başla
-                  </button>
+                  <button onClick={startPractice} disabled={selectedCharacters.length === 0} className="w-full bg-indigo-600 text-white py-4 rounded-3xl font-bold text-lg shadow-lg active:scale-95 transition-all disabled:opacity-50">Ezbere Başla</button>
                 </div>
               )}
 
@@ -754,21 +851,17 @@ const App = () => {
                   
                   <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-600 space-y-4">
                     <div className="flex items-center justify-between">
-                       <button onClick={() => setIsAutoPlaying(!isAutoPlaying)} className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all ${isAutoPlaying ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>
+                       <button onClick={() => { window.speechSynthesis.cancel(); setIsAutoPlaying(!isAutoPlaying); }} className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all ${isAutoPlaying ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>
                          {isAutoPlaying ? <FastForward className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
                          {isAutoPlaying ? 'Akış Açık' : 'Durduruldu'}
                        </button>
-                       <div className="text-xs text-slate-400 dark:text-slate-500 font-mono font-bold">
-                         {currentIndex + 1} / {script.length}
-                       </div>
+                       <div className="text-xs text-slate-400 dark:text-slate-500 font-mono font-bold">{currentIndex + 1} / {script.length}</div>
                     </div>
 
                     <div className="space-y-2">
                       <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                         <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> Hız</span>
-                        <button onClick={() => setShowProgressBar(!showProgressBar)} className="hover:text-indigo-500 transition-colors">
-                          {showProgressBar ? 'Çubuğu Gizle' : 'Çubuğu Göster'}
-                        </button>
+                        <button onClick={() => setShowProgressBar(!showProgressBar)} className="hover:text-indigo-500 transition-colors">{showProgressBar ? 'Çubuğu Gizle' : 'Çubuğu Göster'}</button>
                       </div>
                       <input type="range" min="1" max="5" step="1" value={speedLevel} onChange={(e) => setSpeedLevel(parseInt(e.target.value))} className="w-full h-2 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
                     </div>
@@ -789,64 +882,80 @@ const App = () => {
                     )}
 
                     <div className="flex-1 flex flex-col justify-center items-center text-center px-4 bg-white dark:bg-slate-800 border border-slate-50 dark:border-slate-700 rounded-3xl shadow-inner py-8 transition-all">
-                      <h3 className={`text-sm font-bold mb-4 tracking-widest uppercase transition-colors ${selectedCharacters.includes(script[currentIndex].character) ? 'text-indigo-600 dark:text-indigo-400 underline' : 'text-slate-400 dark:text-slate-500'}`}>
-                        {script[currentIndex].character}
-                      </h3>
-                      
-                      {selectedCharacters.includes(script[currentIndex].character) && !isLocked ? (
-                        <div className="space-y-6 w-full">
-                          <div className={`${getFontSizeClass()} ${getFontFamilyClass()} italic transition-all duration-700 ${isRevealed ? 'opacity-100 blur-0' : 'opacity-0 blur-xl absolute invisible'}`}>
-                            "{script[currentIndex].text}"
-                          </div>
-                          
-                          {!isRevealed && (
-                            <div className="space-y-6 animate-in fade-in zoom-in duration-300">
-                              {isHintVisible ? (
-                                <div className="p-4 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-2xl border-2 border-indigo-100 dark:border-indigo-800 border-dashed mx-auto max-w-[250px] shadow-sm italic font-medium">
-                                  "{script[currentIndex].text.split(' ').slice(0,3).join(' ')}..."
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-center gap-2">
-                                   <div className="text-indigo-200 dark:text-indigo-800"><HelpCircle className="w-12 h-12" /></div>
-                                   <p className="font-black text-xs text-indigo-800 dark:text-indigo-400 tracking-widest uppercase">Sıra Sende</p>
-                                </div>
-                              )}
-                              {!isHintVisible && (
-                                <button onClick={() => { setIsHintVisible(true); setHintUsed(true); setStreak(0); }} className="flex items-center justify-center gap-2 mx-auto border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-400 font-bold text-sm pb-1 hover:text-indigo-800 dark:hover:text-indigo-300 transition-all">
-                                  <Lightbulb className="w-4 h-4" /> İpucu Al
-                                </button>
-                              )}
-                            </div>
-                          )}
+                      {/* BÖLÜM (Sahne/Perde) Özel Görünümü */}
+                      {script[currentIndex].character === 'BÖLÜM' ? (
+                        <div className="space-y-4">
+                           <BookOpen className="w-12 h-12 mx-auto text-indigo-300 dark:text-indigo-700" />
+                           <h2 className="text-3xl font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">{script[currentIndex].text}</h2>
                         </div>
                       ) : (
-                        <div className={`${getFontSizeClass()} ${getFontFamilyClass()} text-slate-800 dark:text-slate-200 leading-relaxed font-medium animate-in fade-in transition-all duration-500`}>
-                          "{script[currentIndex].text}"
-                        </div>
+                        <>
+                          <h3 className={`text-sm font-bold mb-4 tracking-widest uppercase transition-colors ${selectedCharacters.includes(script[currentIndex].character) ? 'text-indigo-600 dark:text-indigo-400 underline' : 'text-slate-400 dark:text-slate-500'}`}>
+                            {script[currentIndex].character}
+                          </h3>
+                          
+                          {selectedCharacters.includes(script[currentIndex].character) && !isLocked ? (
+                            <div className="space-y-6 w-full">
+                              <div className={`${getFontSizeClass()} ${getFontFamilyClass()} italic transition-all duration-700 ${isRevealed ? 'opacity-100 blur-0' : 'opacity-0 blur-xl absolute invisible'}`}>
+                                "{formatEmotionText(script[currentIndex].text)}"
+                              </div>
+                              
+                              {!isRevealed && (
+                                <div className="space-y-6 animate-in fade-in zoom-in duration-300">
+                                  {isHintVisible ? (
+                                    <div className="p-4 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-2xl border-2 border-indigo-100 dark:border-indigo-800 border-dashed mx-auto max-w-[250px] shadow-sm italic font-medium">
+                                      "{script[currentIndex].text.split(' ').slice(0,3).join(' ')}..."
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-2">
+                                      <div className="text-indigo-200 dark:text-indigo-800 relative">
+                                        <HelpCircle className="w-12 h-12" />
+                                        {settings.micEnabled && <Mic className="w-4 h-4 absolute -bottom-1 -right-1 text-rose-500 animate-pulse"/>}
+                                      </div>
+                                      <p className="font-black text-xs text-indigo-800 dark:text-indigo-400 tracking-widest uppercase">Sıra Sende</p>
+                                    </div>
+                                  )}
+                                  {!isHintVisible && (
+                                    <button onClick={() => { setIsHintVisible(true); setHintUsed(true); setStreak(0); setAnalytics(prev => ({...prev, [currentIndex]: (prev[currentIndex] || 0) + 1})); }} className="flex items-center justify-center gap-2 mx-auto border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-400 font-bold text-sm pb-1 hover:text-indigo-800 dark:hover:text-indigo-300 transition-all">
+                                      <Lightbulb className="w-4 h-4" /> İpucu Al
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className={`${getFontSizeClass()} ${getFontFamilyClass()} text-slate-800 dark:text-slate-200 leading-relaxed font-medium animate-in fade-in transition-all duration-500`}>
+                              "{formatEmotionText(script[currentIndex].text)}"
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
 
                   <div className="flex gap-2">
-                    {/* Manuel Gezinme İzinleri Düzeltildi */}
                     <button 
-                      onClick={handlePrevClick} 
-                      disabled={currentIndex === 0 || (isLocked && isAutoPlaying)} 
+                      onClick={handlePrevClick} disabled={currentIndex === 0 || (isLocked && isAutoPlaying)} 
                       className="w-16 flex items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0"
-                      title="Bir Önceki Replik"
-                    >
-                      <ChevronLeft className="w-7 h-7" />
-                    </button>
+                    ><ChevronLeft className="w-7 h-7" /></button>
                     
                     <button
-                      onClick={handleNextClick}
+                      onClick={() => {
+                        if (currentIndex === script.length - 1 && (isRevealed || isLocked || script[currentIndex].character === 'BÖLÜM')) {
+                           window.speechSynthesis.cancel();
+                           setIsAutoPlaying(false);
+                           setIsAnalyticsOpen(true); // Bitirince rapor modalını aç
+                        } else {
+                           handleNextClick();
+                        }
+                      }}
                       disabled={isLocked && isAutoPlaying}
                       className={`flex-1 py-5 rounded-3xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95 min-w-0 ${
                         (isLocked && isAutoPlaying) ? 'bg-slate-100 dark:bg-slate-700 text-slate-300 dark:text-slate-500 shadow-none cursor-not-allowed' :
                         (selectedCharacters.includes(script[currentIndex].character) && !isRevealed && !isLocked ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700')
                       }`}
                     >
-                      {currentIndex === script.length - 1 && (isRevealed || isLocked) ? 'EZBERİ BİTİR' : 
+                      {currentIndex === script.length - 1 && (isRevealed || isLocked || script[currentIndex].character === 'BÖLÜM') ? 'EZBERİ BİTİR' : 
                        (selectedCharacters.includes(script[currentIndex].character) && !isRevealed && !isLocked ? 'CEVABI GÖR' : 'SONRAKİ REPLİK')}
                     </button>
 
@@ -855,9 +964,7 @@ const App = () => {
                       className={`w-16 flex items-center justify-center rounded-3xl transition-all shadow-md shrink-0 ${
                         isLocked ? 'bg-rose-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                       }`}
-                    >
-                      {isLocked ? <Lock className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
-                    </button>
+                    >{isLocked ? <Lock className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}</button>
                   </div>
                 </div>
               )}
@@ -887,9 +994,7 @@ const App = () => {
                               </div>
                               {isSelected && <Check className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mr-2"/>}
                            </button>
-                           <button onClick={() => removeCharacter(char)} className="p-3 text-slate-400 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0">
-                             <Trash2 className="w-5 h-5" />
-                           </button>
+                           <button onClick={() => removeCharacter(char)} className="p-3 text-slate-400 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0"><Trash2 className="w-5 h-5" /></button>
                          </div>
                        )
                     })}
@@ -909,15 +1014,20 @@ const App = () => {
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {script.map((line, idx) => {
+              if (line.character === 'BÖLÜM') {
+                return (
+                  <div key={idx} ref={idx === currentIndex ? activeLineRef : null} className="w-full text-center py-2 mt-4 mb-2 opacity-60">
+                    <span className="text-xs font-black tracking-widest text-indigo-600 dark:text-indigo-400 uppercase">{line.text}</span>
+                  </div>
+                )
+              }
+
               const isMyRole = selectedCharacters.includes(line.character);
               const isCurrent = idx === currentIndex;
               return (
                 <button 
-                  key={idx} 
-                  ref={isCurrent ? activeLineRef : null} // Otomatik kaydırma referansı
-                  onClick={() => {
-                    setCurrentIndex(idx); setIsRevealed(false); setIsHintVisible(false); setHintUsed(false); setIsSidebarOpen(false); updateProgress({ currentIndex: idx });
-                  }}
+                  key={idx} ref={isCurrent ? activeLineRef : null} 
+                  onClick={() => { window.speechSynthesis.cancel(); setCurrentIndex(idx); setIsRevealed(false); setIsHintVisible(false); setHintUsed(false); setIsSidebarOpen(false); updateProgress({ currentIndex: idx }); }}
                   className={`w-full text-left p-3 rounded-2xl border transition-all ${isCurrent ? 'border-indigo-500 bg-indigo-100 dark:bg-indigo-900/30 shadow-sm' : isMyRole ? 'border-indigo-100 dark:border-indigo-800/50 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
                 >
                   <div className="flex justify-between items-center mb-1">
@@ -926,7 +1036,7 @@ const App = () => {
                     </span>
                     {isMyRole && <Check className="w-3 h-3 text-indigo-500" />}
                   </div>
-                  <div className={`text-xs truncate ${isCurrent ? 'text-indigo-900 dark:text-indigo-200 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>"{line.text}"</div>
+                  <div className={`text-xs truncate ${isCurrent ? 'text-indigo-900 dark:text-indigo-200 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>"{line.text.replace(/\[.*?\]|\(.*?\)/g, '')}"</div>
                 </button>
               );
             })}
