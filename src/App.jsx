@@ -92,7 +92,6 @@ const App = () => {
   const [script, setScript] = useState([]);
   const [characters, setCharacters] = useState([]);
   const [selectedCharacters, setSelectedCharacters] = useState([]); 
-  const [charVoices, setCharVoices] = useState({}); // YENİ: Karakter sesleri (M/F)
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [inputText, setInputText] = useState('');
   
@@ -113,9 +112,8 @@ const App = () => {
   const [hintUsed, setHintUsed] = useState(false);
   const [showTenStreakEffect, setShowTenStreakEffect] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState(null);
-  const [isListening, setIsListening] = useState(false); // YENİ: Mikrofon dinleme durumu
+  const [isListening, setIsListening] = useState(false);
 
-  // Ayarlar (Varsayılanlar güncellendi: TTS açık, Mic kapalı)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('sufle_settings');
     const defaultSettings = { darkMode: false, fontSize: 'medium', fontFamily: 'sans', vibration: true, tutorialSeen: false, ttsEnabled: true, micEnabled: false };
@@ -130,7 +128,6 @@ const App = () => {
   const recognitionRef = useRef(null);
   const activeLineRef = useRef(null); 
 
-  // YENİ: Cihazdaki sesleri uygulamaya önden tanıtmak için (Android/Chrome uyumluluğu)
   useEffect(() => {
     window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = () => {
@@ -169,14 +166,20 @@ const App = () => {
     };
   }, []);
 
-  // Mikrofon izni ve kontrolü
+  // YENİ: Mikrofon izni daha agresif isteniyor ve hata mesajı netleştirildi
   const toggleMic = async () => {
     if (!settings.micEnabled) {
       try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // İzin alındı, stream'i hemen kapatabiliriz, SpeechRecognition kendi yönetecek
+        stream.getTracks().forEach(track => track.stop());
         setSettings({...settings, micEnabled: true});
       } catch (err) {
-        alert("Sesle kontrol özelliğini kullanabilmek için cihazınızdan mikrofon izni vermelisiniz.");
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          alert("Mikrofon izni reddedildi! Lütfen cihazınızın veya tarayıcınızın Ayarlar kısmına giderek mikrofon erişimine izin verin.");
+        } else {
+          alert("Mikrofon başlatılamadı. Lütfen cihaz ayarlarını kontrol edin.");
+        }
       }
     } else {
       setSettings({...settings, micEnabled: false});
@@ -221,7 +224,6 @@ const App = () => {
       }
     }
   }, [currentIndex, isRevealed, selectedCharacters, settings.micEnabled, mode, isAutoPlaying]);
-
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -309,10 +311,6 @@ const App = () => {
     if (currentText.length > 0) parsed.push({ character: currentCharacter, text: currentText.join(' ') });
 
     const uniqueChars = [...new Set(parsed.map(p => p.character))].filter(c => c !== 'BİLGİ' && c !== 'BÖLÜM');
-    
-    // Otomatik cinsiyet (ses) ataması (Sırayla E/K)
-    const initialVoices = {};
-    uniqueChars.forEach((c, i) => initialVoices[c] = i % 2 === 0 ? 'M' : 'F');
 
     const newProject = {
       id: Date.now().toString(),
@@ -320,7 +318,6 @@ const App = () => {
       script: parsed,
       characters: uniqueChars,
       selectedCharacters: [],
-      charVoices: initialVoices,
       currentIndex: 0,
       lastAccessed: Date.now()
     };
@@ -344,12 +341,6 @@ const App = () => {
     setAnalytics({});
     window.speechSynthesis.cancel();
     
-    let loadedVoices = project.charVoices || {};
-    if (Object.keys(loadedVoices).length === 0) {
-       project.characters.forEach((c, i) => loadedVoices[c] = i % 2 === 0 ? 'M' : 'F');
-    }
-    setCharVoices(loadedVoices);
-
     if (!project.selectedCharacters || project.selectedCharacters.length === 0) {
       setMode('select');
     } else {
@@ -403,7 +394,7 @@ const App = () => {
     setStreak(0);
     setHintUsed(false);
     setAnalytics({});
-    updateProgress({ currentIndex: 0, selectedCharacters, charVoices });
+    updateProgress({ currentIndex: 0, selectedCharacters });
     setMode('practice');
     setIsAutoPlaying(true);
   };
@@ -418,6 +409,7 @@ const App = () => {
     }
   };
 
+  // YENİ: Sadeleştirilmiş Sesli Okuma (Kadın/Erkek tercihi kaldırıldı)
   const speakLine = (text, character, onEndCallback) => {
     if (!settings.ttsEnabled) {
       if (onEndCallback) onEndCallback();
@@ -428,31 +420,16 @@ const App = () => {
     const ut = new SpeechSynthesisUtterance(cleanText);
     ut.lang = 'tr-TR';
     
-    // Hız ayarı
     const rateMap = { 1: 0.6, 2: 0.8, 3: 1.0, 4: 1.3, 5: 1.6 };
     ut.rate = rateMap[speedLevel] || 1.0;
     
-    const gender = charVoices[character] || 'M';
-    
-    // Cihazdaki sesleri çekip kadın/erkek olarak atama algoritması
     const voices = window.speechSynthesis.getVoices();
     const trVoices = voices.filter(v => v.lang.includes('tr') || v.lang.includes('TR'));
     
     if (trVoices.length > 0) {
-      const femaleVoice = trVoices.find(v => /(yelda|zeynep|ayşe|kadın|female)/i.test(v.name)) || trVoices[0];
-      const maleVoice = trVoices.find(v => /(cem|tolga|erkek|male)/i.test(v.name)) || (trVoices.length > 1 ? trVoices[1] : trVoices[0]);
-      
-      ut.voice = gender === 'F' ? femaleVoice : maleVoice;
-      
-      // Cihazda tek ses varsa efekti (pitch) daha sert uygula
-      if (femaleVoice === maleVoice) {
-        ut.pitch = gender === 'M' ? 0.4 : 1.8; 
-      } else {
-        ut.pitch = 1.0; 
-      }
-    } else {
-      ut.pitch = gender === 'M' ? 0.4 : 1.8;
+      ut.voice = trVoices[0]; // Standart sesi kullan
     }
+    ut.pitch = 1.0; 
 
     if (onEndCallback) {
       ut.onend = () => onEndCallback();
@@ -516,14 +493,6 @@ const App = () => {
     }
   };
 
-  const handleToggleVoice = (e, char) => {
-    e.stopPropagation();
-    const newVoices = {...charVoices, [char]: charVoices[char] === 'M' ? 'F' : 'M'};
-    setCharVoices(newVoices);
-    updateProgress({ charVoices: newVoices });
-  };
-
-  // YENİ: Zamanlayıcı ve TTS Senkronizasyonu (onEnd)
   useEffect(() => {
     if (mode === 'practice' && script[currentIndex] && isAutoPlaying) {
       const currentLine = script[currentIndex];
@@ -545,14 +514,11 @@ const App = () => {
 
         if (timerRef.current) clearTimeout(timerRef.current);
 
-        // Eğer TTS açıksa ve okunacak bir rolse, timer yerine onend (ses bitişini) bekle
         if (settings.ttsEnabled && !isMyRole && !isSpecial) {
           speakLine(currentLine.text, currentLine.character, proceed);
-          // Güvenlik amacıyla ses motoru takılırsa diye yedek bir uzun zamanlayıcı
           const fallbackDelay = calculateDelay(currentLine.text) * 2 + 2000;
           timerRef.current = setTimeout(proceed, fallbackDelay);
         } else {
-          // Normal bekleme (TTS kapalıysa veya özel satırsa)
           const dynamicDelay = getTotalDelay(currentIndex);
           timerRef.current = setTimeout(proceed, dynamicDelay);
         }
@@ -569,7 +535,7 @@ const App = () => {
       }
     }
     return () => { if (timerRef.current) clearTimeout(timerRef.current); window.speechSynthesis.cancel(); };
-  }, [currentIndex, isAutoPlaying, mode, speedLevel, selectedCharacters, isRevealed, isLocked, hintUsed, settings.ttsEnabled, charVoices]);
+  }, [currentIndex, isAutoPlaying, mode, speedLevel, selectedCharacters, isRevealed, isLocked, hintUsed, settings.ttsEnabled]);
 
   const charCounts = getCharCounts(script);
   const charOccurrences = getCharOccurrences(script);
@@ -917,12 +883,6 @@ const App = () => {
                               <span className={`font-bold block truncate ${isSelected ? 'text-indigo-900 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200'}`}>{char}</span>
                               <div className="flex items-center gap-2 mt-1">
                                 <span className="text-xs text-slate-400 dark:text-slate-500">({charCounts[char]} Replik)</span>
-                                <button 
-                                  onClick={(e) => handleToggleVoice(e, char)}
-                                  className="text-[10px] px-2 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
-                                >
-                                  {charVoices[char] === 'M' ? '👨 Erkek Ses' : '👩 Kadın Ses'}
-                                </button>
                               </div>
                             </div>
                             {isSelected && <Check className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mr-2 shrink-0" />}
@@ -1034,7 +994,7 @@ const App = () => {
                         if (currentIndex === script.length - 1 && (isRevealed || isLocked || script[currentIndex].character === 'BÖLÜM')) {
                            window.speechSynthesis.cancel();
                            setIsAutoPlaying(false);
-                           setIsAnalyticsOpen(true); // Bitirince rapor modalını aç
+                           setIsAnalyticsOpen(true); 
                         } else {
                            handleNextClick();
                         }
@@ -1083,14 +1043,6 @@ const App = () => {
                                 <span className={`text-xs font-normal ${isSelected ? 'text-indigo-500 dark:text-indigo-400' : 'text-slate-400'}`}>({charCounts[char]} Replik)</span>
                               </div>
                               {isSelected && <Check className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mr-2"/>}
-                           </button>
-                           
-                           {/* Modaldaki Erkek/Kadın Ses Butonu */}
-                           <button 
-                              onClick={(e) => handleToggleVoice(e, char)}
-                              className="text-[10px] px-2 py-2 mr-2 bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors shrink-0 font-bold border border-slate-200 dark:border-slate-600"
-                           >
-                              {charVoices[char] === 'M' ? '👨 Erkek Ses' : '👩 Kadın Ses'}
                            </button>
 
                            <button onClick={() => removeCharacter(char)} className="p-3 text-slate-400 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-xl transition-all shrink-0"><Trash2 className="w-5 h-5" /></button>
